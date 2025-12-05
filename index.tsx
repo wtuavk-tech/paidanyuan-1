@@ -10,27 +10,23 @@ import {
   AlertTriangle, 
   Trash2, 
   DollarSign, 
-  Filter,
   ChevronDown,
   ChevronUp,
   X,
   Plus,
-  Upload,
-  Image as ImageIcon,
   Calendar,
-  MessageCircle,
   Send,
-  Smile,
-  Video,
-  Paperclip,
   User,
-  ListFilter,
-  SlidersHorizontal,
   Activity,
   Zap,
   LayoutDashboard,
   Wallet,
-  ClipboardList
+  ClipboardList,
+  Bell,
+  CheckSquare,
+  XSquare,
+  HelpCircle,
+  ShieldBan
 } from 'lucide-react';
 
 // --- 类型定义 ---
@@ -41,6 +37,19 @@ enum OrderStatus {
   Void = '作废',
   Returned = '已退回',
   Error = '报错'
+}
+
+// 派单紧急状态
+enum DispatchStatus {
+  Normal = '正常',
+  Urgent = '催单',
+  Timeout = '已超时'
+}
+
+// 派单方式
+enum DispatchMethod {
+  Grab = '抢单',
+  Negotiate = '谈单'
 }
 
 interface Order {
@@ -59,18 +68,19 @@ interface Order {
   details: string;
   recordTime: string;
   source: string;
-  totalAmount: number;
-  cost: number;
+  totalAmount: number; 
+  cost: number;        
   hasAdvancePayment: boolean; 
   depositAmount?: number;
   weightedCoefficient: number;
-  regionPeople: number; // 新增：地域人数
+  regionPeople: number;
+  // 新增字段
+  dispatchStatus: DispatchStatus;
+  dispatchMethod: DispatchMethod;
+  marketPrice: number;       // 划线价
+  historyPriceLow: number;   // 历史成交低价
+  historyPriceHigh: number;  // 历史成交高价
 }
-
-// --- 辅助函数：智能金额格式化 ---
-const formatCurrency = (amount: number) => {
-  return Number.isInteger(amount) ? amount.toString() : amount.toFixed(1);
-};
 
 // --- 自动生成 128 条 Mock 数据 ---
 const generateMockData = (): Order[] => {
@@ -88,7 +98,8 @@ const generateMockData = (): Order[] => {
     let returnReason = undefined;
     let errorDetail = undefined;
 
-    if (pendingCount < 10 && i % 10 === 0) { 
+    // 增加更多待派单数据以展示排序效果
+    if (i % 5 === 0) { 
       status = OrderStatus.PendingDispatch;
       pendingCount++;
     } else if (i % 15 === 1) {
@@ -103,9 +114,24 @@ const generateMockData = (): Order[] => {
       status = OrderStatus.Completed;
     }
 
+    // 生成派单状态：增加催单和超时的比例
+    let dispatchStatus = DispatchStatus.Normal;
+    if (status === OrderStatus.PendingDispatch) {
+        const r = Math.random();
+        if (r > 0.6) dispatchStatus = DispatchStatus.Timeout;
+        else if (r > 0.3) dispatchStatus = DispatchStatus.Urgent;
+    }
+
     const baseAddress = `${['阳光', '幸福', '金地', '万科', '恒大'][i % 5]}花园 ${i % 20 + 1}栋 ${i % 30 + 1}0${i % 4 + 1}室`;
     const extraInfo = `(需联系物业核实车位情况)`;
     const baseDetails = ['需带梯子，层高3.5米，有大型犬', '有宠物，需要发票，客户要求穿鞋套', '尽量上午，客户下午要出门', '需带吸尘器，重点清理地毯', '刚装修完，灰尘较大'][i % 5];
+    
+    const serviceItem = services[i % services.length];
+    const isHighValue = serviceItem.includes('深度') || serviceItem.includes('甲醛') || serviceItem.includes('开荒');
+    
+    const marketPrice = isHighValue ? 300 + (i % 10) * 20 : 100 + (i % 5) * 10;
+    const historyLow = Math.floor(marketPrice * 0.8);
+    const historyHigh = Math.floor(marketPrice * 1.2);
 
     return {
       id,
@@ -113,7 +139,7 @@ const generateMockData = (): Order[] => {
       workOrderNo: `WO-${9980 + id}`,
       dispatchTime: `10-${27 + Math.floor(i/30)} ${String(8 + (i % 10)).padStart(2, '0')}:${String((i * 5) % 60).padStart(2, '0')}`,
       mobile: `13${i % 9 + 1}****${String(1000 + i).slice(-4)}`,
-      serviceItem: services[i % services.length],
+      serviceItem: serviceItem,
       serviceRatio: (['3:7', '4:6', '2:8'][i % 3]) as any,
       status,
       returnReason,
@@ -128,7 +154,12 @@ const generateMockData = (): Order[] => {
       hasAdvancePayment: i % 7 === 0,
       depositAmount: i % 12 === 0 ? 50 : undefined,
       weightedCoefficient: coefficients[i % coefficients.length],
-      regionPeople: Math.floor(Math.random() * 6), // 0-5人随机
+      regionPeople: Math.floor(Math.random() * 6),
+      dispatchStatus,
+      dispatchMethod: isHighValue ? DispatchMethod.Negotiate : DispatchMethod.Grab,
+      marketPrice,
+      historyPriceLow: historyLow,
+      historyPriceHigh: historyHigh,
     };
   });
 };
@@ -137,35 +168,43 @@ const FULL_MOCK_DATA = generateMockData();
 
 // --- 组件部分 ---
 
-// Block Stat Item for "Box" look - Removed Background Color (bg-transparent)
 const BlockStat = ({ label, value, color = "text-slate-700", highlight = false }: { label: string, value: string | number, color?: string, highlight?: boolean }) => (
-  <div className="flex flex-col items-center justify-center border border-blue-100 rounded px-2 py-1.5 flex-1 h-[42px] transition-all hover:bg-blue-50/30 hover:border-blue-200 shadow-sm bg-transparent">
-    <span className="text-[10px] text-slate-500 leading-none mb-1">{label}</span>
-    <span className={`font-mono font-bold ${highlight ? 'text-emerald-600' : color} text-xs leading-none`}>{value}</span>
+  <div className="flex flex-col items-center justify-center border border-blue-100/50 rounded-lg px-3 py-1 flex-1 h-[64px] transition-all hover:bg-blue-50/50 hover:border-blue-200 shadow-sm bg-white/40">
+    <span className="text-sm font-bold text-slate-500 mb-1">{label}</span>
+    <span className={`font-mono font-extrabold ${highlight ? 'text-emerald-600' : color} text-2xl leading-none tracking-tight`}>{value}</span>
   </div>
 );
 
-// 常驻操作栏
-const ActionBar = () => {
+const NotificationBar = () => {
   return (
-    <div className="flex items-center gap-6 mb-3 px-1">
-      <div className="flex items-center gap-3">
-        <button className="h-8 px-5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded shadow-md shadow-blue-200 flex items-center gap-1.5 transition-all active:scale-95 font-medium">
-          <Plus size={14} /> 录单
-        </button>
-        <button className="h-8 px-5 bg-[#6366f1] hover:bg-[#4f46e5] text-white text-xs rounded shadow-md shadow-indigo-200 flex items-center gap-1.5 transition-all active:scale-95 font-medium">
-          <Zap size={14} /> 快找
-        </button>
+    <div className="flex items-center gap-4 mb-3 px-4 py-2 bg-gradient-to-r from-orange-50 via-amber-50 to-orange-50 border border-orange-100 rounded-lg shadow-sm overflow-hidden relative group/marquee">
+      <div className="flex items-center gap-2 text-orange-600 shrink-0 z-10 bg-inherit pr-2">
+        <div className="relative">
+          <Bell size={18} className="animate-[wiggle_1s_ease-in-out_infinite]" />
+          <div className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border-2 border-orange-50"></div>
+        </div>
+        <span className="text-xs font-bold whitespace-nowrap">系统公告</span>
       </div>
       
-      <div className="h-5 w-px bg-slate-300"></div>
-      
-      <div className="flex items-center gap-6 text-xs text-slate-600 font-medium">
-        <button className="hover:text-blue-600 transition-colors hover:bg-white hover:shadow-sm px-2 py-1 rounded">批量完成</button>
-        <button className="hover:text-blue-600 transition-colors hover:bg-white hover:shadow-sm px-2 py-1 rounded">批量作废</button>
-        <button className="hover:text-blue-600 transition-colors hover:bg-white hover:shadow-sm px-2 py-1 rounded">存疑号码</button>
-        <button className="hover:text-blue-600 transition-colors hover:bg-white hover:shadow-sm px-2 py-1 rounded">黑名单</button>
+      <div className="flex-1 overflow-hidden relative h-6 flex items-center">
+        <div className="whitespace-nowrap animate-[marquee_25s_linear_infinite] group-hover/marquee:[animation-play-state:paused] flex items-center gap-8 text-xs font-medium text-slate-700 cursor-default">
+          <span>🔥 <span className="font-bold text-orange-600">紧急通知：</span>系统将于今晚 02:00 进行例行维护，预计耗时 15 分钟，请提前保存数据。</span>
+          <span>🏆 <span className="font-bold text-blue-600">喜报：</span>恭喜上海浦东区张师傅获得本月“服务之星”称号，奖励现金 500 元！</span>
+          <span>📢 <span className="font-bold text-emerald-600">新功能上线：</span>“一键快找”功能已优化，支持按地域和项目模糊搜索，欢迎体验。</span>
+          <span>⚠️ <span className="font-bold text-red-600">提醒：</span>近期多雨天气，请各位师傅外出注意安全，带好雨具。</span>
+        </div>
       </div>
+
+      <style>{`
+        @keyframes wiggle {
+          0%, 100% { transform: rotate(-3deg); }
+          50% { transform: rotate(3deg); }
+        }
+        @keyframes marquee {
+          0% { transform: translateX(100%); }
+          100% { transform: translateX(-100%); }
+        }
+      `}</style>
     </div>
   );
 };
@@ -175,36 +214,21 @@ const SearchPanel = ({ isOpen, onToggle }: { isOpen: boolean; onToggle: () => vo
   const [personType, setPersonType] = useState('order');
   const [otherType, setOtherType] = useState('status');
 
-  // Random Mock Data for Stats
   const stats = {
-    record: {
-      total: 128,
-      error: 3,
-      all: 135,
-      afterSales: 5,
-      refund: '450.5'
-    },
-    dispatch: {
-      today: 42,
-      past: 86,
-      other: 12,
-      self: 30,
-      single: 8,
-      none: 2
-    },
-    perf: {
-      rate: '98.5%',
-      today: '12850.0',
-      wechat: '5600.0',
-      platform: '7250.0',
-      offline: '0'
-    }
+    record: { total: 128, error: 3, all: 135, afterSales: 5, refund: '450.5' },
+    dispatch: { today: 42, past: 86, other: 12, self: 30, single: 8, none: 2 },
+    perf: { rate: '98.5%', today: '12850.0', wechat: '5600.0', platform: '7250.0', offline: '0' }
   };
+
+  const ActionButton = ({ icon: Icon, label, colorClass }: { icon: any, label: string, colorClass: string }) => (
+    <button className={`h-7 px-2.5 ${colorClass} text-white text-[11px] rounded shadow-sm flex items-center gap-1 transition-all active:scale-95 font-medium whitespace-nowrap`}>
+      <Icon size={12} /> {label}
+    </button>
+  );
 
   return (
     <div className={`shadow-lg mb-3 transition-all duration-300 ease-out relative overflow-hidden border border-blue-100 rounded-lg bg-gradient-to-br from-[#f0f7ff] via-[#e6f4ff] to-[#dbeafe]`}>
       
-      {/* 收起状态 */}
       {!isOpen && (
         <div className="px-4 py-2 flex items-center justify-between cursor-pointer hover:bg-white/50 transition-colors group" onClick={onToggle}>
           <div className="flex items-center gap-2 text-slate-600">
@@ -216,26 +240,23 @@ const SearchPanel = ({ isOpen, onToggle }: { isOpen: boolean; onToggle: () => vo
         </div>
       )}
       
-      {/* 展开状态 - 50% / 50% 布局 */}
       {isOpen && (
-        <div className="flex min-h-[240px] animate-in fade-in slide-in-from-top-2 duration-200">
+        <div className="flex min-h-[260px] animate-in fade-in slide-in-from-top-2 duration-200">
           
-          {/* ============ LEFT PANEL: DATA OVERVIEW (50%) ============ */}
-          <div className="w-1/2 p-4 border-r border-blue-200/60 flex flex-col relative backdrop-blur-sm bg-white/30">
-             <div className="flex items-center gap-2 mb-3 h-6"> 
-                <Activity size={16} className="text-blue-600" />
-                <h3 className="text-sm font-bold text-slate-800">数据概览</h3>
+          {/* LEFT PANEL: DATA OVERVIEW (66%) */}
+          <div className="w-[66%] p-5 border-r border-blue-200/60 flex flex-col relative backdrop-blur-sm bg-white/30">
+             <div className="flex items-center gap-2 mb-4 h-6"> 
+                <Activity size={18} className="text-blue-600" />
+                <h3 className="text-base font-bold text-slate-800">数据概览</h3>
              </div>
 
-             <div className="space-y-3 flex-1 flex flex-col justify-center"> 
-               
-               {/* 行一：订单情况 (Order Status) */}
-               <div className="flex items-center gap-3 h-[42px]"> 
-                  <div className="flex items-center gap-2 text-blue-600 w-[70px] justify-end shrink-0">
-                    <ClipboardList size={14} />
-                    <span className="text-xs font-bold">订单情况</span>
+             <div className="space-y-4 flex-1 flex flex-col justify-center"> 
+               <div className="flex items-center gap-4 h-[64px]"> 
+                  <div className="flex items-center gap-2 text-blue-600 w-[80px] justify-end shrink-0">
+                    <ClipboardList size={16} />
+                    <span className="text-sm font-bold">订单情况</span>
                   </div>
-                  <div className="flex items-center gap-1 flex-1 w-full">
+                  <div className="flex items-center gap-2 flex-1 w-full">
                     <BlockStat label="录单数" value={stats.record.total} />
                     <BlockStat label="报错数" value={stats.record.error} color="text-red-500" />
                     <BlockStat label="总单数" value={stats.record.all} />
@@ -244,13 +265,12 @@ const SearchPanel = ({ isOpen, onToggle }: { isOpen: boolean; onToggle: () => vo
                   </div>
                </div>
 
-               {/* 行二：派单详情 (Dispatch Details) */}
-               <div className="flex items-center gap-3 h-[42px]">
-                  <div className="flex items-center gap-2 text-cyan-600 w-[70px] justify-end shrink-0">
-                    <Zap size={14} />
-                    <span className="text-xs font-bold">派单详情</span>
+               <div className="flex items-center gap-4 h-[64px]">
+                  <div className="flex items-center gap-2 text-cyan-600 w-[80px] justify-end shrink-0">
+                    <Zap size={16} />
+                    <span className="text-sm font-bold">派单详情</span>
                   </div>
-                  <div className="flex items-center gap-1 flex-1 w-full">
+                  <div className="flex items-center gap-2 flex-1 w-full">
                     <BlockStat label="今日派单" value={stats.dispatch.today} />
                     <BlockStat label="往日派单" value={stats.dispatch.past} />
                     <BlockStat label="他派" value={stats.dispatch.other} />
@@ -260,13 +280,12 @@ const SearchPanel = ({ isOpen, onToggle }: { isOpen: boolean; onToggle: () => vo
                   </div>
                </div>
 
-               {/* 行三：业绩指标 (Performance Metrics) */}
-               <div className="flex items-center gap-3 h-[42px]">
-                  <div className="flex items-center gap-2 text-indigo-600 w-[70px] justify-end shrink-0">
-                    <Wallet size={14} />
-                    <span className="text-xs font-bold">业绩指标</span>
+               <div className="flex items-center gap-4 h-[64px]">
+                  <div className="flex items-center gap-2 text-indigo-600 w-[80px] justify-end shrink-0">
+                    <Wallet size={16} />
+                    <span className="text-sm font-bold">业绩指标</span>
                   </div>
-                  <div className="flex items-center gap-1 flex-1 w-full">
+                  <div className="flex items-center gap-2 flex-1 w-full">
                      <BlockStat label="收款率" value={stats.perf.rate} />
                      <BlockStat label="今日业绩" value={stats.perf.today} highlight />
                      <BlockStat label="今日微信" value={stats.perf.wechat} />
@@ -277,23 +296,30 @@ const SearchPanel = ({ isOpen, onToggle }: { isOpen: boolean; onToggle: () => vo
              </div>
           </div>
 
-          {/* ============ RIGHT PANEL: SEARCH & FILTERS (50%) ============ */}
-          <div className="w-1/2 p-4 flex flex-col relative backdrop-blur-sm bg-white/60">
-             {/* Header with Close Button Only */}
-             <div className="flex justify-between items-center mb-3 h-6">
-                <div className="flex items-center gap-2">
-                   <Search size={16} className="text-blue-600" />
-                   <h3 className="text-sm font-bold text-slate-800">高级筛选</h3>
+          {/* RIGHT PANEL: SEARCH & FILTERS (34%) */}
+          <div className="w-[34%] p-4 flex flex-col relative backdrop-blur-sm bg-white/60">
+             <div className="flex flex-col gap-3 mb-4">
+                <div className="flex justify-between items-center h-8">
+                    <div className="flex items-center gap-2">
+                       <Search size={16} className="text-blue-600" />
+                       <h3 className="text-sm font-bold text-slate-800">高级筛选</h3>
+                    </div>
+                    <button onClick={onToggle} className="text-[10px] text-slate-400 hover:text-blue-600 flex items-center gap-1 hover:bg-blue-50 px-2 py-1 rounded transition-all">
+                        <ChevronUp size={12} /> 收起
+                    </button>
                 </div>
-                <button onClick={onToggle} className="text-[10px] text-slate-400 hover:text-blue-600 flex items-center gap-1 hover:bg-blue-50 px-2 py-1 rounded transition-all">
-                   <ChevronUp size={12} /> 收起
-                </button>
+                
+                <div className="flex flex-wrap gap-2">
+                   <ActionButton icon={Plus} label="录单" colorClass="bg-blue-600 hover:bg-blue-700" />
+                   <ActionButton icon={Zap} label="快找" colorClass="bg-[#6366f1] hover:bg-[#4f46e5]" />
+                   <ActionButton icon={CheckSquare} label="批量完成" colorClass="bg-emerald-600 hover:bg-emerald-700" />
+                   <ActionButton icon={XSquare} label="批量作废" colorClass="bg-slate-500 hover:bg-slate-600" />
+                   <ActionButton icon={HelpCircle} label="存疑号码" colorClass="bg-orange-500 hover:bg-orange-600" />
+                   <ActionButton icon={ShieldBan} label="黑名单" colorClass="bg-red-600 hover:bg-red-700" />
+                </div>
              </div>
 
-             {/* Search Inputs Grid - Vertical Stack */}
              <div className="space-y-3 flex-1 flex flex-col justify-center">
-                
-                {/* 1. 时间搜索 (Row 1) */}
                 <div className="flex items-center gap-2 bg-white border border-blue-100 p-1 rounded hover:border-blue-300 transition-colors shadow-sm h-[42px]">
                   <div className="text-blue-400 px-1"><Calendar size={16} /></div>
                   <div className="relative">
@@ -309,75 +335,65 @@ const SearchPanel = ({ isOpen, onToggle }: { isOpen: boolean; onToggle: () => vo
                     </select>
                     <ChevronDown size={12} className="absolute right-0 top-2.5 text-slate-400 pointer-events-none"/>
                   </div>
-                  <div className="flex items-center gap-1 flex-1">
-                     <input type="datetime-local" className="bg-transparent text-xs text-slate-600 outline-none flex-1 px-1 min-w-0 h-full" />
+                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                     <input type="datetime-local" className="bg-transparent text-[10px] text-slate-600 outline-none flex-1 px-0 min-w-0 h-full" />
                      <span className="text-slate-300">-</span>
-                     <input type="datetime-local" className="bg-transparent text-xs text-slate-600 outline-none flex-1 px-1 min-w-0 h-full" />
+                     <input type="datetime-local" className="bg-transparent text-[10px] text-slate-600 outline-none flex-1 px-0 min-w-0 h-full" />
                   </div>
                 </div>
 
-                {/* 2. 人员搜索 + 其他搜索 (Row 2 - Merged) */}
-                <div className="flex gap-3 h-[42px]">
-                    {/* Personnel Search (Flex 1) */}
-                    <div className="flex-1 flex items-center gap-2 bg-white border border-blue-100 p-1 rounded hover:border-blue-300 transition-colors shadow-sm min-w-0">
+                <div className="flex gap-2 h-[42px]">
+                    <div className="flex-[1.2] flex items-center gap-1 bg-white border border-blue-100 p-1 rounded hover:border-blue-300 transition-colors shadow-sm min-w-0">
                       <div className="text-blue-400 px-1 shrink-0"><User size={16} /></div>
                       <div className="relative shrink-0">
                         <select 
                           value={personType}
                           onChange={(e) => setPersonType(e.target.value)}
-                          className="h-8 pl-1 pr-4 border-none bg-transparent text-xs font-bold text-slate-700 focus:ring-0 appearance-none cursor-pointer outline-none w-[70px]"
+                          className="h-8 pl-1 pr-3 border-none bg-transparent text-xs font-bold text-slate-700 focus:ring-0 appearance-none cursor-pointer outline-none w-[50px]"
                         >
-                          <option value="order">综合搜索</option>
+                          <option value="order">综合</option>
                           <option value="master">师傅</option>
-                          <option value="dispatcher">派单员</option>
+                          <option value="dispatcher">派单</option>
                         </select>
-                        <ChevronDown size={12} className="absolute right-0 top-2.5 text-slate-400 pointer-events-none"/>
                       </div>
                       <div className="flex-1 h-full min-w-0">
-                         <input type="text" className="bg-transparent text-xs text-slate-600 outline-none w-full h-full px-2 placeholder-slate-400 border-l border-slate-100" placeholder="关键字..." />
+                         <input type="text" className="bg-transparent text-xs text-slate-600 outline-none w-full h-full px-1 placeholder-slate-400 border-l border-slate-100" placeholder="关键字" />
                       </div>
                     </div>
 
-                    {/* Other Search (Flex 1) */}
-                    <div className="flex-1 flex items-center gap-2 bg-white border border-blue-100 p-1 rounded hover:border-blue-300 transition-colors shadow-sm min-w-0">
-                      <div className="text-blue-400 px-1 shrink-0"><SlidersHorizontal size={16} /></div>
+                    <div className="flex-1 flex items-center gap-1 bg-white border border-blue-100 p-1 rounded hover:border-blue-300 transition-colors shadow-sm min-w-0">
                       <div className="relative shrink-0">
                         <select 
                           value={otherType}
                           onChange={(e) => setOtherType(e.target.value)}
-                          className="h-8 pl-1 pr-4 border-none bg-transparent text-xs font-bold text-slate-700 focus:ring-0 appearance-none cursor-pointer outline-none w-[70px]"
+                          className="h-8 pl-2 pr-3 border-none bg-transparent text-xs font-bold text-slate-700 focus:ring-0 appearance-none cursor-pointer outline-none w-[60px]"
                         >
                           <option value="status">状态</option>
-                          <option value="service">服务项目</option>
+                          <option value="service">项目</option>
                           <option value="region">地域</option>
-                          <option value="source">来源</option>
-                          <option value="dispatch">派单</option>
                         </select>
-                        <ChevronDown size={12} className="absolute right-0 top-2.5 text-slate-400 pointer-events-none"/>
                       </div>
                       <div className="flex-1 h-full min-w-0">
                          {otherType === 'status' ? (
                            <div className="relative w-full h-full">
-                              <select className="h-full w-full px-2 border-l border-slate-100 text-xs text-slate-600 focus:outline-none bg-transparent appearance-none cursor-pointer">
+                              <select className="h-full w-full px-1 border-l border-slate-100 text-xs text-slate-600 focus:outline-none bg-transparent appearance-none cursor-pointer">
                                 <option value="">全部</option>
                                 <option value="PendingDispatch">待派单</option>
                                 <option value="Completed">已完成</option>
                               </select>
-                              <ChevronDown size={12} className="absolute right-2 top-3 text-slate-400 pointer-events-none"/>
                            </div>
                          ) : (
-                           <input type="text" className="bg-transparent text-xs text-slate-600 outline-none w-full h-full px-2 placeholder-slate-400 border-l border-slate-100" placeholder="输入..." />
+                           <input type="text" className="bg-transparent text-xs text-slate-600 outline-none w-full h-full px-1 placeholder-slate-400 border-l border-slate-100" placeholder="输入" />
                          )}
                       </div>
                     </div>
                 </div>
 
-                {/* 3. 按钮组 (Row 3 - Centered & Aligned with Left Row 3) */}
-                <div className="flex items-center justify-center gap-4 h-[42px]">
-                    <button className="h-8 px-8 bg-white text-slate-600 hover:text-blue-600 text-xs rounded transition-colors border border-slate-200 hover:border-blue-300 shadow-sm font-medium min-w-[100px]">
+                <div className="flex items-center justify-between gap-3 h-[42px]">
+                    <button className="h-8 flex-1 bg-white text-slate-600 hover:text-blue-600 text-xs rounded transition-colors border border-slate-200 hover:border-blue-300 shadow-sm font-medium">
                         重置
                     </button>
-                    <button onClick={onToggle} className="h-8 px-10 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs rounded transition-all font-bold shadow-md flex items-center gap-2 active:scale-95 min-w-[140px] justify-center">
+                    <button onClick={onToggle} className="h-8 flex-[2] bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs rounded transition-all font-bold shadow-md flex items-center gap-2 active:scale-95 justify-center">
                         <Search size={14} /> 立即搜索
                     </button>
                 </div>
@@ -388,8 +404,6 @@ const SearchPanel = ({ isOpen, onToggle }: { isOpen: boolean; onToggle: () => vo
     </div>
   );
 };
-
-// ... TooltipCell, ServiceItemCell, StatusCell, DispatchCell, OrderNoCell, ActionCell, ChatModal, CompleteOrderModal remain unchanged ...
 
 const TooltipCell = ({ content, maxWidthClass = "max-w-[100px]", showTooltip }: { content: string, maxWidthClass?: string, showTooltip: boolean }) => {
   return (
@@ -407,49 +421,12 @@ const TooltipCell = ({ content, maxWidthClass = "max-w-[100px]", showTooltip }: 
   );
 }
 
-const ServiceItemCell = ({ item, ratio, rowIndex, showTooltip }: { item: string; ratio: string; rowIndex: number; showTooltip: boolean }) => {
-  const getMockDetails = (name: string) => {
-    const isHighValue = name.includes('深度') || name.includes('甲醛') || name.includes('玻璃');
-    return {
-      dispatchMethod: isHighValue ? '优先指派' : '全网抢单',
-      historyPrice: isHighValue ? '350 - 1200' : '150 - 220', 
-      basePrice: isHighValue ? '200' : '80' 
-    };
-  };
-
-  const details = getMockDetails(item);
-  const isTopRow = rowIndex < 2;
-  const tooltipPositionClass = isTopRow ? 'top-full mt-2' : 'bottom-full mb-2';
-  const arrowPositionClass = isTopRow ? 'bottom-full -mb-1 border-b-gray-800' : 'top-full -mt-1 border-t-gray-800';
-
+const ServiceItemCell = ({ item }: { item: string }) => {
   return (
-    <div className="relative inline-block cursor-help py-1">
-      <span className="font-medium text-gray-700 border-b border-dashed border-gray-300 pb-0.5 transition-colors group-hover:border-blue-400 group-hover:text-blue-600">
+    <div className="py-1">
+      <span className="font-bold text-gray-700 hover:text-blue-600 cursor-default transition-colors">
         {item}
       </span>
-      {showTooltip && (
-        <div className={`absolute left-0 w-64 bg-gray-800 text-white text-xs rounded-lg shadow-xl p-4 z-[60] text-left animate-in fade-in duration-200 ${tooltipPositionClass}`}>
-           <div className="space-y-3">
-              <div className="flex justify-between items-center border-b border-gray-600 pb-2">
-                <span className="text-gray-400">建议分成比例</span>
-                <span className="font-bold text-yellow-400 text-sm">{ratio}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-400">建议派单方式</span>
-                <span className="font-medium">{details.dispatchMethod}</span>
-              </div>
-               <div className="flex justify-between items-center">
-                <span className="text-gray-400">历史成交价</span>
-                <span className="font-medium">{details.historyPrice}</span>
-              </div>
-               <div className="flex justify-between items-center">
-                <span className="text-gray-400">师傅成交底价</span>
-                <span className="font-medium text-green-300">{details.basePrice}</span>
-              </div>
-           </div>
-           <div className={`absolute left-4 border-4 border-transparent ${arrowPositionClass}`}></div>
-        </div>
-      )}
     </div>
   );
 };
@@ -487,15 +464,13 @@ const StatusCell = ({ order }: { order: Order }) => {
   );
 };
 
-// 1. Dispatch Cell Updated: Copy functionality with Popover Selection
-const DispatchCell = ({ order }: { order: Order }) => {
+// DispatchCell: 包含派单按钮、复制功能和闪烁提示
+const DispatchCell = ({ order, isFirstRow }: { order: Order, isFirstRow: boolean }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [dispatchType, setDispatchType] = useState<'online' | 'offline' | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [isFlashVisible, setIsFlashVisible] = useState(true);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
 
-  // Close popover on click outside or scroll
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (buttonRef.current && !buttonRef.current.contains(event.target as Node)) {
@@ -515,82 +490,83 @@ const DispatchCell = ({ order }: { order: Order }) => {
   }, [isOpen, order.id]);
 
   const togglePopover = () => {
+    // 点击派单按钮时，隐藏闪烁提示
+    setIsFlashVisible(false);
+    
     if (!isOpen && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
-      // Position popover to the left of the button or slightly overlapping
       setMenuPosition({
         top: rect.bottom + 5,
-        left: rect.right - 180 // Align roughly
+        left: rect.left - 20 // 调整一下弹出位置
       });
-      // Reset state on open
-      setDispatchType(null);
-      setCopied(false);
     }
     setIsOpen(!isOpen);
   };
 
-  const handleCopy = async () => {
+  const handleCopyAndClose = async (type: string) => {
     const text = `订单号：${order.orderNo}\n手机号：${order.mobile}\n服务项目：${order.serviceItem}\n地域：${order.region}\n详细地址：${order.address}\n详情：${order.details}`;
     try {
         await navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => {
-           setCopied(false);
-           setIsOpen(false); // Optional: close after copy
-        }, 1500);
+        // 这里可以加一个 Toast 提示，目前为了简洁直接关闭
     } catch (err) {
-        alert("复制失败");
+        console.error("Copy failed");
     }
+    setIsOpen(false);
   };
 
   if (order.status === OrderStatus.PendingDispatch) {
+    const isUrgent = order.dispatchStatus === DispatchStatus.Urgent;
+    const isTimeout = order.dispatchStatus === DispatchStatus.Timeout;
+    const showFlash = isFlashVisible && (isUrgent || isTimeout);
+
     return (
-      <>
+      <div className="relative inline-block">
+        {/* 闪动文字提示 */}
+        {showFlash && (
+            <div className={`absolute left-1/2 -translate-x-1/2 whitespace-nowrap z-10 animate-bounce ${isFirstRow ? '-top-6' : '-top-5'}`}>
+                <span className={`text-[10px] font-bold px-1 rounded bg-white/95 border shadow-sm ${isUrgent ? 'text-orange-500 border-orange-200' : 'text-red-600 border-red-200'}`}>
+                    {order.dispatchStatus}
+                </span>
+            </div>
+        )}
+
         <button 
           ref={buttonRef}
           onClick={togglePopover}
-          className="px-2.5 py-1 bg-orange-500 hover:bg-orange-600 text-white text-[10px] rounded shadow-sm font-medium transition-colors min-w-[50px]"
+          className="px-2.5 py-1 bg-orange-500 hover:bg-orange-600 text-white text-[10px] rounded shadow-sm font-medium transition-colors min-w-[50px] relative"
         >
           派单
         </button>
-        
+
         {isOpen && createPortal(
           <div 
             id={`dispatch-popover-${order.id}`}
-            className="fixed z-[9999] bg-white rounded-lg shadow-xl border border-slate-200 p-3 w-48 animate-in fade-in zoom-in-95 duration-150"
+            className="fixed z-[9999] bg-white rounded-lg shadow-xl border border-slate-200 p-2 w-32 animate-in fade-in zoom-in-95 duration-150"
             style={{ top: menuPosition.top, left: menuPosition.left }}
           >
-            <div className="text-xs font-bold text-slate-700 mb-2 border-b border-slate-100 pb-1">选择派单方式</div>
-            
-            <div className="flex gap-2 mb-3">
+            <div className="flex flex-col gap-1">
                 <button 
-                  onClick={() => setDispatchType('offline')}
-                  className={`flex-1 py-1.5 text-[11px] border rounded transition-colors ${dispatchType === 'offline' ? 'bg-blue-50 border-blue-500 text-blue-600 font-bold' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                  onClick={() => handleCopyAndClose('offline')}
+                  className="text-[11px] py-2 px-2 text-left rounded hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-colors"
                 >
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
                   线下派单
                 </button>
                 <button 
-                  onClick={() => setDispatchType('online')}
-                  className={`flex-1 py-1.5 text-[11px] border rounded transition-colors ${dispatchType === 'online' ? 'bg-blue-50 border-blue-500 text-blue-600 font-bold' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                  onClick={() => handleCopyAndClose('online')}
+                  className="text-[11px] py-2 px-2 text-left rounded hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-colors"
                 >
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
                   线上派单
                 </button>
+                <div className="text-[9px] text-gray-400 text-center pt-1 border-t border-slate-100 mt-1">
+                    点击即复制信息
+                </div>
             </div>
-            
-            {/* Show Copy Button only after selection */}
-            {dispatchType && (
-              <button 
-                onClick={handleCopy} 
-                className={`w-full text-[11px] py-1.5 rounded flex items-center justify-center gap-1.5 transition-all ${copied ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
-              >
-                {copied ? <CheckCircle size={12}/> : <Copy size={12}/>}
-                {copied ? '复制成功' : '复制订单信息'}
-              </button>
-            )}
           </div>,
           document.body
         )}
-      </>
+      </div>
     );
   }
   return (
@@ -741,8 +717,19 @@ const App = () => {
   const pageSize = 20; 
   
   const sortedData = [...FULL_MOCK_DATA].sort((a, b) => {
-    if (a.status === OrderStatus.PendingDispatch && b.status !== OrderStatus.PendingDispatch) return -1;
-    if (a.status !== OrderStatus.PendingDispatch && b.status === OrderStatus.PendingDispatch) return 1;
+    // 优先级评分：催单(3) > 已超时(2) > 正常(1) > 其他(0)
+    const getUrgencyScore = (status: DispatchStatus, orderStatus: OrderStatus) => {
+        if (orderStatus !== OrderStatus.PendingDispatch) return 0;
+        if (status === DispatchStatus.Urgent) return 3;
+        if (status === DispatchStatus.Timeout) return 2;
+        return 1;
+    };
+
+    const scoreA = getUrgencyScore(a.dispatchStatus, a.status);
+    const scoreB = getUrgencyScore(b.dispatchStatus, b.status);
+
+    if (scoreA !== scoreB) return scoreB - scoreA; // 降序排列
+
     return 0;
   });
 
@@ -751,7 +738,7 @@ const App = () => {
   const currentData = sortedData.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   
   const [chatState, setChatState] = useState<{isOpen: boolean; role: string; order: Order | null;}>({ isOpen: false, role: '', order: null });
-  const [hoveredTooltipCell, setHoveredTooltipCell] = useState<{rowId: number, colKey: 'address' | 'details' | 'service'} | null>(null);
+  const [hoveredTooltipCell, setHoveredTooltipCell] = useState<{rowId: number, colKey: 'address' | 'details'} | null>(null);
 
   const handleAction = (action: string, id: number) => {
     const order = sortedData.find(o => o.id === id);
@@ -769,8 +756,7 @@ const App = () => {
     <div className="min-h-screen bg-gradient-to-br from-slate-200 to-slate-300 p-6 flex flex-col">
       <div className="max-w-[1800px] mx-auto w-full flex-1 flex flex-col">
         
-        {/* NEW: Persistent Action Bar */}
-        <ActionBar />
+        <NotificationBar />
 
         <SearchPanel isOpen={isSearchOpen} onToggle={() => setIsSearchOpen(!isSearchOpen)} />
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex-1 flex flex-col overflow-hidden">
@@ -778,64 +764,92 @@ const App = () => {
             <table className="w-full text-left border-collapse">
               <thead className="sticky top-0 z-20 shadow-sm">
                 <tr className="bg-slate-50 border-b-2 border-gray-300 text-xs font-bold uppercase text-slate-700 tracking-wider">
-                  <th className="px-4 py-2 whitespace-nowrap">手机号</th>
-                  <th className="px-4 py-2 min-w-[120px] whitespace-nowrap">服务项目</th>
-                  <th className="px-4 py-2 whitespace-nowrap">状态</th>
-                  <th className="px-4 py-2 whitespace-nowrap text-center">加权系数</th> 
-                  <th className="px-4 py-2 whitespace-nowrap">地域</th>
-                  <th className="px-4 py-2 max-w-[100px] whitespace-nowrap">详细地址</th> 
-                  <th className="px-4 py-2 max-w-[140px] whitespace-nowrap">详情</th>
-                  <th className="px-4 py-2 text-right whitespace-nowrap">总收款</th>
-                  <th className="px-4 py-2 text-right whitespace-nowrap">业绩</th>
-                  <th className="px-4 py-2 text-right whitespace-nowrap">成本</th>
-                  <th className="px-4 py-2 whitespace-nowrap">来源</th>
-                  <th className="px-4 py-2 min-w-[160px] whitespace-nowrap">订单号</th>
-                  <th className="px-4 py-2 whitespace-nowrap">工单号</th>
-                  <th className="px-4 py-2 whitespace-nowrap">录单时间</th> 
-                  <th className="px-4 py-2 whitespace-nowrap">派单时间</th>
-                  <th className="px-4 py-2 whitespace-nowrap text-center">联系人</th>
-                  <th className="px-4 py-2 whitespace-nowrap text-center">派单</th> 
-                  <th className="px-4 py-2 text-center sticky right-0 bg-slate-50 shadow-[-10px_0_10px_-10px_rgba(0,0,0,0.05)] z-10 whitespace-nowrap">操作</th>
+                  <th className="px-2 py-2 whitespace-nowrap">手机号</th>
+                  <th className="px-2 py-2 min-w-[120px] whitespace-nowrap">服务项目</th>
+                  <th className="px-2 py-2 whitespace-nowrap">状态</th>
+                  <th className="px-2 py-2 whitespace-nowrap text-center">加权系数</th> 
+                  <th className="px-2 py-2 whitespace-nowrap">地域</th>
+                  <th className="px-2 py-2 max-w-[100px] whitespace-nowrap">详细地址</th> 
+                  <th className="px-2 py-2 max-w-[140px] whitespace-nowrap">详情</th>
+                  
+                  <th className="px-2 py-2 whitespace-nowrap">建议分成</th>
+                  <th className="px-2 py-2 whitespace-nowrap">建议派单方式</th>
+                  <th className="px-2 py-2 whitespace-nowrap">划线价/历史价</th>
+                  
+                  <th className="px-2 py-2 whitespace-nowrap">来源</th>
+                  <th className="px-2 py-2 min-w-[160px] whitespace-nowrap">订单号</th>
+                  <th className="px-2 py-2 whitespace-nowrap">工单号</th>
+                  <th className="px-2 py-2 whitespace-nowrap">录单时间</th> 
+                  <th className="px-2 py-2 whitespace-nowrap">派单时间</th>
+                  <th className="px-2 py-2 whitespace-nowrap text-center">联系人</th>
+                  
+                  {/* 派单列 */}
+                  <th className="px-2 py-2 whitespace-nowrap text-center">派单</th> 
+                  
+                  <th className="px-2 py-2 text-center sticky right-0 bg-slate-50 shadow-[-10px_0_10px_-10px_rgba(0,0,0,0.05)] z-10 whitespace-nowrap">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-300">
-                {currentData.map((order, index) => (
-                  <tr key={order.id} onMouseLeave={handleMouseEnterOther} className="bg-white even:bg-blue-50 hover:!bg-blue-100 transition-colors group text-xs border-b border-gray-300 last:border-0 align-middle">
-                    <td className="px-4 py-2 text-slate-800 font-bold tabular-nums whitespace-nowrap align-middle" onMouseEnter={handleMouseEnterOther}>{order.mobile}</td>
-                    <td className="px-4 py-2 align-middle whitespace-nowrap" onMouseEnter={() => setHoveredTooltipCell({rowId: order.id, colKey: 'service'})}>
-                      <ServiceItemCell item={order.serviceItem} ratio={order.serviceRatio} rowIndex={index} showTooltip={hoveredTooltipCell?.rowId === order.id && hoveredTooltipCell?.colKey === 'service'} />
-                    </td>
-                    <td className="px-4 py-2 align-middle" onMouseEnter={() => setHoveredTooltipCell({rowId: order.id, colKey: 'service'})}>
-                      <StatusCell order={order} />
-                    </td>
-                    <td className="px-4 py-2 text-center font-mono text-slate-600 font-medium align-middle" onMouseEnter={handleMouseEnterOther}>{order.weightedCoefficient.toFixed(1)}</td>
-                    <td className="px-4 py-2 text-slate-700 whitespace-nowrap align-middle" onMouseEnter={handleMouseEnterOther}>
-                        <div className="relative pr-8"> 
-                            {order.region}
-                            <span className="absolute bottom-0 right-0 text-[9px] text-blue-600 border border-blue-200 bg-blue-50 px-1 rounded">
-                              {order.regionPeople}人
+                {currentData.map((order, index) => {
+                  const isFirstRow = index === 0;
+                  return (
+                    <tr 
+                        key={order.id} 
+                        onMouseLeave={handleMouseEnterOther} 
+                        className={`bg-white even:bg-blue-50 hover:!bg-blue-100 transition-colors group text-xs border-b border-gray-300 last:border-0 align-middle ${isFirstRow ? 'h-16' : ''}`}
+                    >
+                        <td className={`px-2 py-2 text-slate-800 font-bold tabular-nums whitespace-nowrap align-middle ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}>{order.mobile}</td>
+                        <td className={`px-2 py-2 align-middle whitespace-nowrap ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}>
+                        <ServiceItemCell item={order.serviceItem} />
+                        </td>
+                        <td className={`px-2 py-2 align-middle ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}>
+                        <StatusCell order={order} />
+                        </td>
+                        <td className={`px-2 py-2 text-center font-mono text-slate-600 font-medium align-middle ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}>{order.weightedCoefficient.toFixed(1)}</td>
+                        <td className={`px-2 py-2 text-slate-700 whitespace-nowrap align-middle ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}>
+                            <div className="relative pr-8"> 
+                                {order.region}
+                                <span className="absolute bottom-0 right-0 text-[9px] text-blue-600 border border-blue-200 bg-blue-50 px-1 rounded">
+                                {order.regionPeople}人
+                                </span>
+                            </div>
+                        </td>
+                        <td className={`px-2 py-2 align-middle ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={() => setHoveredTooltipCell({rowId: order.id, colKey: 'address'})}>
+                        <TooltipCell content={order.address} maxWidthClass="max-w-[100px]" showTooltip={hoveredTooltipCell?.rowId === order.id && hoveredTooltipCell?.colKey === 'address'} />
+                        </td>
+                        <td className={`px-2 py-2 align-middle ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={() => setHoveredTooltipCell({rowId: order.id, colKey: 'details'})}>
+                        <TooltipCell content={order.details} maxWidthClass="max-w-[140px]" showTooltip={hoveredTooltipCell?.rowId === order.id && hoveredTooltipCell?.colKey === 'details'} />
+                        </td>
+                        
+                        <td className={`px-2 py-2 font-medium text-yellow-600 align-middle ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}>
+                            {order.serviceRatio}
+                        </td>
+                        <td className={`px-2 py-2 align-middle ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}>
+                            <span className={`px-2 py-0.5 rounded text-[10px] ${order.dispatchMethod === DispatchMethod.Grab ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' : 'bg-pink-50 text-pink-600 border border-pink-100'}`}>
+                                {order.dispatchMethod}
                             </span>
-                        </div>
-                    </td>
-                    <td className="px-4 py-2 align-middle" onMouseEnter={() => setHoveredTooltipCell({rowId: order.id, colKey: 'address'})}>
-                      <TooltipCell content={order.address} maxWidthClass="max-w-[100px]" showTooltip={hoveredTooltipCell?.rowId === order.id && hoveredTooltipCell?.colKey === 'address'} />
-                    </td>
-                    <td className="px-4 py-2 align-middle" onMouseEnter={() => setHoveredTooltipCell({rowId: order.id, colKey: 'details'})}>
-                      <TooltipCell content={order.details} maxWidthClass="max-w-[140px]" showTooltip={hoveredTooltipCell?.rowId === order.id && hoveredTooltipCell?.colKey === 'details'} />
-                    </td>
-                    <td className="px-4 py-2 text-right font-bold text-slate-900 tabular-nums align-middle whitespace-nowrap" onMouseEnter={handleMouseEnterOther}>{formatCurrency(order.totalAmount)}</td>
-                    <td className="px-4 py-2 text-right font-bold text-emerald-600 tabular-nums align-middle whitespace-nowrap" onMouseEnter={handleMouseEnterOther}>{formatCurrency(order.totalAmount - order.cost)}</td>
-                    <td className="px-4 py-2 text-right text-slate-500 font-medium tabular-nums align-middle whitespace-nowrap" onMouseEnter={handleMouseEnterOther}>{formatCurrency(order.cost)}</td>
-                    <td className="px-4 py-2 align-middle" onMouseEnter={handleMouseEnterOther}><span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded text-[10px] border border-slate-200 whitespace-nowrap font-medium">{order.source}</span></td>
-                    <td className="px-4 py-2 align-middle" onMouseEnter={handleMouseEnterOther}><OrderNoCell orderNo={order.orderNo} hasAdvancePayment={order.hasAdvancePayment} depositAmount={order.depositAmount} /></td>
-                    <td className="px-4 py-2 text-slate-500 font-mono text-[10px] whitespace-nowrap align-middle" onMouseEnter={handleMouseEnterOther}>{order.workOrderNo}</td>
-                    <td className="px-4 py-2 text-slate-400 text-[10px] whitespace-nowrap tabular-nums align-middle" onMouseEnter={handleMouseEnterOther}>{order.recordTime}</td>
-                    <td className="px-4 py-2 text-slate-500 text-[10px] whitespace-nowrap tabular-nums align-middle" onMouseEnter={handleMouseEnterOther}>{order.dispatchTime}</td>
-                    <td className="px-4 py-2 align-middle text-center" onMouseEnter={handleMouseEnterOther}><div className="flex flex-row gap-1 justify-center items-center"><button onClick={() => handleOpenChat('客服', order)} className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 bg-white hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-colors whitespace-nowrap font-medium">客服</button><button onClick={() => handleOpenChat('运营', order)} className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 bg-white hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-colors whitespace-nowrap font-medium">运营</button><button onClick={() => handleOpenChat('售后', order)} className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 bg-white hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-colors whitespace-nowrap font-medium">售后</button></div></td>
-                    <td className="px-4 py-2 text-center whitespace-nowrap" onMouseEnter={handleMouseEnterOther}><DispatchCell order={order} /></td>
-                    <td className="px-4 py-2 text-center sticky right-0 bg-slate-50 shadow-[-10px_0_10px_-10px_rgba(0,0,0,0.05)] z-10 whitespace-nowrap" onMouseEnter={handleMouseEnterOther}><ActionCell orderId={order.id} onAction={handleAction} /></td>
-                  </tr>
-                ))}
+                        </td>
+                        <td className={`px-2 py-2 font-mono text-[11px] align-middle ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}>
+                            <span className="text-slate-400 line-through mr-2">{order.marketPrice}</span>
+                            <span className="text-slate-700">{order.historyPriceLow}-{order.historyPriceHigh}</span>
+                        </td>
+
+                        <td className={`px-2 py-2 align-middle ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}><span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded text-[10px] border border-slate-200 whitespace-nowrap font-medium">{order.source}</span></td>
+                        <td className={`px-2 py-2 align-middle ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}><OrderNoCell orderNo={order.orderNo} hasAdvancePayment={order.hasAdvancePayment} depositAmount={order.depositAmount} /></td>
+                        <td className={`px-2 py-2 text-slate-500 font-mono text-[10px] whitespace-nowrap align-middle ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}>{order.workOrderNo}</td>
+                        <td className={`px-2 py-2 text-slate-400 text-[10px] whitespace-nowrap tabular-nums align-middle ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}>{order.recordTime}</td>
+                        <td className={`px-2 py-2 text-slate-500 text-[10px] whitespace-nowrap tabular-nums align-middle ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}>{order.dispatchTime}</td>
+                        <td className={`px-2 py-2 align-middle text-center ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}><div className="flex flex-row gap-1 justify-center items-center"><button onClick={() => handleOpenChat('客服', order)} className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 bg-white hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-colors whitespace-nowrap font-medium">客服</button><button onClick={() => handleOpenChat('运营', order)} className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 bg-white hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-colors whitespace-nowrap font-medium">运营</button><button onClick={() => handleOpenChat('售后', order)} className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 bg-white hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-colors whitespace-nowrap font-medium">售后</button></div></td>
+                        
+                        {/* Dispatch Action (Special handling for flash text in first row) */}
+                        <td className={`px-2 py-2 text-center whitespace-nowrap ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}>
+                            <DispatchCell order={order} isFirstRow={isFirstRow} />
+                        </td>
+                        
+                        <td className={`px-2 py-2 text-center sticky right-0 bg-slate-50 shadow-[-10px_0_10px_-10px_rgba(0,0,0,0.05)] z-10 whitespace-nowrap ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}><ActionCell orderId={order.id} onAction={handleAction} /></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
