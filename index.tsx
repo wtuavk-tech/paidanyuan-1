@@ -776,10 +776,10 @@ const App = () => {
         <NotificationBar />
 
         <SearchPanel isOpen={isSearchOpen} onToggle={() => setIsSearchOpen(!isSearchOpen)} />
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex-1 flex flex-col overflow-hidden">
-          <div className="overflow-x-auto flex-1 overflow-y-auto">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex-1 flex flex-col">
+          <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
-              <thead className="sticky top-0 z-20 shadow-sm">
+              <thead className="sticky top-0 z-20 shadow-sm bg-slate-50">
                 <tr className="bg-slate-50 border-b-2 border-gray-300 text-xs font-bold uppercase text-slate-700 tracking-wider">
                   <th className="px-2 py-2 whitespace-nowrap">手机号</th>
                   <th className="px-2 py-2 min-w-[120px] whitespace-nowrap">服务项目</th>
