@@ -33,7 +33,7 @@ import {
 
 enum OrderStatus {
   PendingDispatch = '待派单',
-  Completed = '已完成',
+  Completed = '已完成', // 在此场景下也作为“已派单”的状态
   Void = '作废',
   Returned = '已退回',
   Error = '报错'
@@ -163,8 +163,6 @@ const generateMockData = (): Order[] => {
     };
   });
 };
-
-const FULL_MOCK_DATA = generateMockData();
 
 // --- 组件部分 ---
 
@@ -465,7 +463,7 @@ const StatusCell = ({ order }: { order: Order }) => {
 };
 
 // DispatchCell: 包含派单按钮、复制功能和闪烁提示
-const DispatchCell = ({ order, isFirstRow }: { order: Order, isFirstRow: boolean }) => {
+const DispatchCell = ({ order, isFirstRow, onDispatch }: { order: Order, isFirstRow: boolean, onDispatch: (id: number) => void }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isFlashVisible, setIsFlashVisible] = useState(true);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -508,6 +506,9 @@ const DispatchCell = ({ order, isFirstRow }: { order: Order, isFirstRow: boolean
     try {
         await navigator.clipboard.writeText(text);
         // 这里可以加一个 Toast 提示，目前为了简洁直接关闭
+        
+        // 关键逻辑：调用父组件回调，更新状态为已派单
+        onDispatch(order.id);
     } catch (err) {
         console.error("Copy failed");
     }
@@ -710,13 +711,29 @@ const CompleteOrderModal = ({ isOpen, onClose, order }: { isOpen: boolean; onClo
 };
 
 const App = () => {
+  // 使用 State 管理订单数据，以支持动态更新
+  const [orders, setOrders] = useState<Order[]>(generateMockData());
   const [completeModalOpen, setCompleteModalOpen] = useState(false);
   const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false); 
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 20; 
   
-  const sortedData = [...FULL_MOCK_DATA].sort((a, b) => {
+  // 派单处理回调
+  const handleDispatch = (id: number) => {
+      setOrders(prevOrders => prevOrders.map(o => {
+          if (o.id === id) {
+              return {
+                  ...o,
+                  status: OrderStatus.Completed, // 更新为已派单/已完成状态
+                  dispatchStatus: DispatchStatus.Normal // 移除紧急状态
+              };
+          }
+          return o;
+      }));
+  };
+
+  const sortedData = [...orders].sort((a, b) => {
     // 优先级评分：催单(3) > 已超时(2) > 正常(1) > 其他(0)
     const getUrgencyScore = (status: DispatchStatus, orderStatus: OrderStatus) => {
         if (orderStatus !== OrderStatus.PendingDispatch) return 0;
@@ -843,7 +860,7 @@ const App = () => {
                         
                         {/* Dispatch Action (Special handling for flash text in first row) */}
                         <td className={`px-2 py-2 text-center whitespace-nowrap ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}>
-                            <DispatchCell order={order} isFirstRow={isFirstRow} />
+                            <DispatchCell order={order} isFirstRow={isFirstRow} onDispatch={handleDispatch} />
                         </td>
                         
                         <td className={`px-2 py-2 text-center sticky right-0 bg-slate-50 shadow-[-10px_0_10px_-10px_rgba(0,0,0,0.05)] z-10 whitespace-nowrap ${isFirstRow ? 'pt-6' : ''}`} onMouseEnter={handleMouseEnterOther}><ActionCell orderId={order.id} onAction={handleAction} /></td>
