@@ -603,8 +603,10 @@ const App = () => {
                 <th style={{width: '3.5%'}} className="px-1 py-2 text-center">状态</th>
                 <th style={{width: '3%'}} className="px-1 py-2 text-center">系数</th> 
                 <th style={{width: '6%'}} className="px-1 py-2">地域</th>
-                <th style={{width: '6%'}} className="px-1 py-2">详细地址</th> 
-                <th style={{width: '20.5%'}} className="px-1 py-2">详情</th>
+                {/* 优化：详细地址 6% -> 7.2% */}
+                <th style={{width: '7.2%'}} className="px-1 py-2">详细地址</th> 
+                {/* 优化：详情 20.5% -> 16.4% */}
+                <th style={{width: '16.4%'}} className="px-1 py-2">详情</th>
                 <th style={{width: '4%'}} className="px-1 py-2 text-center">分成</th>
                 <th style={{width: '4%'}} className="px-1 py-2 text-center">方式</th>
                 <th style={{width: '3.5%'}} className="px-1 py-2 text-center">划线价</th>
@@ -653,7 +655,6 @@ const App = () => {
                           <div className="text-[9px] text-slate-400 font-mono truncate" title={order.workOrderNo}>{order.workOrderNo}</div>
                       </td>
                       
-                      {/* 优化：增大 gap，增大字号和圆圈大小 */}
                       <td className={`px-1 py-1 ${isFirstRow?'pt-5':''}`}>
                           <div className="flex flex-col gap-1">
                               <div className="text-[9px] text-slate-400 flex items-center gap-1">
